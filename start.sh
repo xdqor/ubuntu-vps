@@ -1,30 +1,38 @@
 #!/bin/bash
 set -e
 
-mkdir -p /run/sshd /root/.ssh
-chmod 700 /root/.ssh
+: "${FRIEND_USERNAME:?Set FRIEND_USERNAME in Railway Variables}"
+: "${FRIEND_PASSWORD:?Set FRIEND_PASSWORD in Railway Variables}"
 
-if [ -z "${SSH_PUBLIC_KEY:-}" ]; then
-    echo "ERROR: SSH_PUBLIC_KEY variable is missing."
+if ! [[ "$FRIEND_USERNAME" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+    echo "Invalid username"
     exit 1
 fi
 
-printf '%s\n' "$SSH_PUBLIC_KEY" > /root/.ssh/authorized_keys
-chmod 600 /root/.ssh/authorized_keys
+apt-get update
+apt-get install -y openssh-server sudo
+mkdir -p /run/sshd /home/dev
+
+if ! id "$FRIEND_USERNAME" >/dev/null 2>&1; then
+    useradd -m -s /bin/bash "$FRIEND_USERNAME"
+fi
+
+printf '%s:%s\n' "$FRIEND_USERNAME" "$FRIEND_PASSWORD" | chpasswd
+
+mkdir -p "/home/$FRIEND_USERNAME/.ssh"
+chown -R "$FRIEND_USERNAME:$FRIEND_USERNAME" "/home/$FRIEND_USERNAME"
 
 ssh-keygen -A
 
 cat > /etc/ssh/sshd_config <<'EOF'
 Port 2222
-PermitRootLogin prohibit-password
-PubkeyAuthentication yes
-PasswordAuthentication no
+PermitRootLogin no
+PasswordAuthentication yes
 KbdInteractiveAuthentication no
-UsePAM no
-AuthorizedKeysFile .ssh/authorized_keys
+UsePAM yes
+PubkeyAuthentication yes
 AllowTcpForwarding no
 X11Forwarding no
-PrintMotd no
 EOF
 
 exec /usr/sbin/sshd -D -e
